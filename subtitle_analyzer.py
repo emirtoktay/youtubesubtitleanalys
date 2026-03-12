@@ -2,28 +2,26 @@ import re
 import json
 import gc  # RAM temizliği için
 import numpy as np
-import joblib
 import requests  # YENİ
-import yt_dlp    # YENİ (Sorunsuz altyazı çekici)
-# Model 1: LSTM (TensorFlow/Keras)
-import tensorflow as tf
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing.text import tokenizer_from_json
-from tensorflow.keras.preprocessing.sequence import pad_sequences
-from sklearn.preprocessing import LabelEncoder as LSTM_LabelEncoder
+import yt_dlp  # YENİ (Sorunsuz altyazı çekici)
 
-# Model 2: BERT (Hugging Face Transformers/PyTorch)
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-import torch
 
-# GPU aramasın, direkt CPU kullansın
-tf.config.set_visible_devices([], 'GPU')
-
+# DİKKAT: tensorflow, torch, transformers, joblib ve sklearn importları
+# buradan tamamen silindi. RAM şişmesin diye sadece video gelince yüklenecekler!
 
 # ==============================
-# 🔹 MODEL YÜKLEME FONKSİYONLARI
+# 🔹 MODEL YÜKLEME FONKSİYONLARI (Tembel Yükleme)
 # ==============================
 def load_lstm_model():
+    # Sadece fonksiyon çağrıldığında RAM'e alınır
+    import tensorflow as tf
+    from tensorflow.keras.models import load_model
+    from tensorflow.keras.preprocessing.text import tokenizer_from_json
+    from sklearn.preprocessing import LabelEncoder as LSTM_LabelEncoder
+
+    # GPU aramasın, direkt CPU kullansın
+    tf.config.set_visible_devices([], 'GPU')
+
     try:
         model = load_model("turkish_toxic_lstm_model_full.h5")
         with open("label_encoder.json", "r", encoding="utf-8") as f:
@@ -39,6 +37,11 @@ def load_lstm_model():
 
 
 def load_bert_model():
+    # Sadece fonksiyon çağrıldığında RAM'e alınır
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    from sklearn.preprocessing import LabelEncoder as LSTM_LabelEncoder
+    import torch
+
     try:
         MODEL_DIR = "armud/emir-toxic-bert"
         tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
@@ -57,6 +60,9 @@ def load_bert_model():
 
 
 def load_svc_model():
+    # Sadece fonksiyon çağrıldığında RAM'e alınır
+    import joblib
+
     try:
         model = joblib.load("linear_svc_model.pkl")
         vectorizer = joblib.load("tfidf_vectorizer.pkl")
@@ -66,9 +72,6 @@ def load_svc_model():
         return None, None
 
 
-# ===================================================
-# 🔹 ALTYAZI ÇEKME (YT-DLP İLE YENİLENDİ!)
-# ===================================================
 # ===================================================
 # 🔹 ALTYAZI ÇEKME (YT-DLP + ANDROID TAKLİDİ!)
 # ===================================================
@@ -143,10 +146,12 @@ def get_caption_with_yta(video_id: str):
         print(f"⚠️ DİKKAT: yt-dlp altyazı çekerken hata fırlattı: {e}")
         return []
 
+
 # ===================================================
-# 🔹 TAHMİN FONKSİYONLARI (Artık modelleri parametre olarak alıyor)
+# 🔹 TAHMİN FONKSİYONLARI
 # ===================================================
 def predict_text_lstm(text, model, tokenizer, le):
+    from tensorflow.keras.preprocessing.sequence import pad_sequences
     if model is None: return "MODEL_HATA"
     seq = tokenizer.texts_to_sequences([text])
     padded = pad_sequences(seq, maxlen=100, padding='post', truncating='post')
@@ -156,6 +161,7 @@ def predict_text_lstm(text, model, tokenizer, le):
 
 
 def predict_text_bert(text, model, tokenizer, le, device):
+    import torch
     if model is None: return "MODEL_HATA"
     inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=128).to(device)
     with torch.no_grad():
@@ -171,9 +177,6 @@ def predict_text_svc(text, model, vectorizer):
     return model.predict(vec)[0]
 
 
-# ===================================================
-# 🔹 ANA ANALİZ FONKSİYONU (SİHİR BURADA GERÇEKLEŞİYOR)
-# ===================================================
 # ===================================================
 # 🔹 ANA ANALİZ FONKSİYONU (SIRALI YÜKLEME VE SİLME)
 # ===================================================
@@ -199,6 +202,10 @@ def analyze_subtitles(video_id):
                 safe_counts["lstm"] += 1
     print("🧹 LSTM işi bitti, RAM'den siliniyor...")
     del lstm_m, lstm_t, lstm_le
+
+    # Keras backend'i temizlemek için tf'yi buraya çağırıyoruz
+    import tensorflow as tf
+    tf.keras.backend.clear_session()
     gc.collect()
 
     # ---------------------------------------------------

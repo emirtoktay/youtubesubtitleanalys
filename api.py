@@ -5,7 +5,6 @@ from flask_cors import CORS
 import os
 
 # SADECE GEREKLİ MODÜLLER KALDI (Görsel analizler silindi)
-import subtitle_analyzer
 import db_manager
 
 app = Flask(__name__)
@@ -111,6 +110,11 @@ def analyze_youtube():
         try:
             # --- 2. SADECE METİN ANALİZİ (GÖRSEL İPTAL) ---
             print(f"📝 Sadece Altyazı analizi yapılıyor... ({video_id})")
+
+            # 🚀 İŞTE SİHİRLİ DOKUNUŞ: Tembel Yükleme (Lazy Import)
+            # Sadece video geldiğinde yapay zeka modelleri RAM'e çekilir.
+            import subtitle_analyzer
+
             sub_results = subtitle_analyzer.analyze_subtitles(video_id)
 
             if sub_results:
