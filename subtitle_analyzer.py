@@ -200,6 +200,7 @@ def analyze_subtitles(video_id):
     print("🧹 LSTM işi bitti, RAM'den siliniyor...")
     del lstm_m, lstm_t, lstm_le
     gc.collect()
+    tf.keras.backend.clear_session()
 
     # ---------------------------------------------------
     # 2. AŞAMA: SADECE BERT (En Ağırı)
