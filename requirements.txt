@@ -7,5 +7,5 @@ transformers
 scikit-learn
 joblib
 numpy
-psycopg2-binary
+pg8000
 gunicorn
