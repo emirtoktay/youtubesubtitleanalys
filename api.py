@@ -2,6 +2,7 @@ import re
 import threading  # Eşzamanlı istekleri engellemek için
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import os
 
 # SADECE GEREKLİ MODÜLLER KALDI (Görsel analizler silindi)
 import subtitle_analyzer
