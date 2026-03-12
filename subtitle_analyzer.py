@@ -69,14 +69,22 @@ def load_svc_model():
 # ===================================================
 # 🔹 ALTYAZI ÇEKME
 # ===================================================
+# ===================================================
+# 🔹 ALTYAZI ÇEKME
+# ===================================================
 def get_caption_with_yta(video_id: str):
+    print(f"🔍 Altyazı aranıyor... Video ID: {video_id}")
     try:
         lines = YouTubeTranscriptApi.get_transcript(video_id, languages=['tr'])
+        print(f"✅ Altyazı başarıyla çekildi: {len(lines)} satır.")
     except NoTranscriptFound:
+        print("⚠️ DİKKAT: Bu videoda Türkçe (tr) altyazı bulunamadı!")
         return []
     except TranscriptsDisabled:
+        print("⚠️ DİKKAT: Bu video için altyazılar tamamen kapatılmış!")
         return []
     except Exception as e:
+        print(f"⚠️ DİKKAT: Altyazı çekerken bilinmeyen bir sorun oldu: {e}")
         return []
 
     captions = []
