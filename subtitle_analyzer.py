@@ -3,8 +3,8 @@ import json
 import gc  # RAM temizliği için
 import numpy as np
 import joblib
-from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
-
+import requests  # YENİ
+import yt_dlp    # YENİ (Sorunsuz altyazı çekici)
 # Model 1: LSTM (TensorFlow/Keras)
 import tensorflow as tf
 from tensorflow.keras.models import load_model
@@ -67,48 +67,69 @@ def load_svc_model():
 
 
 # ===================================================
-# 🔹 ALTYAZI ÇEKME
-# ===================================================
-# ===================================================
-# 🔹 ALTYAZI ÇEKME
-# ===================================================
-# ===================================================
-# 🔹 ALTYAZI ÇEKME (GÜNCELLENDİ)
+# 🔹 ALTYAZI ÇEKME (YT-DLP İLE YENİLENDİ!)
 # ===================================================
 def get_caption_with_yta(video_id: str):
-    print(f"🔍 Altyazı aranıyor... Video ID: {video_id}")
+    print(f"🔍 yt-dlp ile altyazı aranıyor... Video ID: {video_id}")
+    url = f"https://www.youtube.com/watch?v={video_id}"
+
+    # yt-dlp ayarları: Videoyu indirme, sadece TR altyazıyı JSON formatında al
+    ydl_opts = {
+        'skip_download': True,
+        'writesubtitles': True,
+        'writeautomaticsub': True,  # Otomatik çevirileri de kabul et (MÜKEMMEL ÖZELLİK)
+        'subtitleslangs': ['tr'],
+        'subtitlesformat': 'json3',
+        'quiet': True,
+        'no_warnings': True
+    }
+
     try:
-        # 💡 YENİ YÖNTEM: Hata veren get_transcript yerine list_transcripts kullanıyoruz
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
 
-        # Direkt olarak 'tr' (Türkçe) altyazıyı bul ve çek
-        transcript = transcript_list.find_transcript(['tr'])
-        lines = transcript.fetch()
+            # Altyazı var mı kontrol et
+            subs = info.get('requested_subtitles', {})
+            if not subs or 'tr' not in subs:
+                print("⚠️ DİKKAT: Bu videoda normal veya otomatik Türkçe (tr) altyazı bulunamadı!")
+                return []
 
-        print(f"✅ Altyazı başarıyla çekildi: {len(lines)} satır.")
+            # Altyazı dosyasının JSON linkini al
+            sub_url = subs['tr'].get('url')
+            if not sub_url:
+                return []
 
-    except NoTranscriptFound:
-        print("⚠️ DİKKAT: Bu videoda Türkçe (tr) altyazı bulunamadı!")
-        return []
-    except TranscriptsDisabled:
-        print("⚠️ DİKKAT: Bu video için altyazılar tamamen kapatılmış!")
-        return []
+            # Linkten JSON verisini anında indir ve parçala
+            resp = requests.get(sub_url)
+            data = resp.json()
+
+            captions = []
+            for event in data.get('events', []):
+                if 'segs' in event:
+                    # Kelimeleri birleştirip tek satır yap
+                    text = "".join([seg.get('utf8', '') for seg in event['segs']]).strip()
+
+                    if not text or re.fullmatch(r"[\[\(].*[\]\)]", text.strip()):
+                        continue
+
+                    # Küfür filtrelemesi
+                    text = text.replace("[__]", "siktir").replace("[ __ ]", "amk").replace("[\xa0__\xa0]", "amk")
+
+                    start = event.get('tStartMs', 0) / 1000.0
+                    duration = event.get('dDurationMs', 0) / 1000.0
+
+                    captions.append({
+                        "text": text,
+                        "start": round(start, 2),
+                        "end": round(start + duration, 2)
+                    })
+
+            print(f"✅ Altyazı yt-dlp ile başarıyla çekildi: {len(captions)} satır.")
+            return captions
+
     except Exception as e:
-        print(f"⚠️ DİKKAT: Altyazı çekerken bilinmeyen bir sorun oldu: {e}")
+        print(f"⚠️ DİKKAT: yt-dlp altyazı çekerken hata fırlattı: {e}")
         return []
-
-    captions = []
-    for line in lines:
-        text = line['text'].strip()
-        if not text or re.fullmatch(r"[\[\(].*[\]\)]", text.strip()): continue
-        # Küfür filtrelemesi
-        text = text.replace("[__]", "siktir").replace("[ __ ]", "amk").replace("[\xa0__\xa0]", "amk")
-        captions.append({
-            "text": text,
-            "start": round(line['start'], 2),
-            "end": round(line['start'] + line['duration'], 2)
-        })
-    return captions
 
 # ===================================================
 # 🔹 TAHMİN FONKSİYONLARI (Artık modelleri parametre olarak alıyor)
