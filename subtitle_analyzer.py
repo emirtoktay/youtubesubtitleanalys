@@ -69,17 +69,29 @@ def load_svc_model():
 # ===================================================
 # 🔹 ALTYAZI ÇEKME (YT-DLP İLE YENİLENDİ!)
 # ===================================================
+# ===================================================
+# 🔹 ALTYAZI ÇEKME (YT-DLP + ANDROID TAKLİDİ!)
+# ===================================================
 def get_caption_with_yta(video_id: str):
-    print(f"🔍 yt-dlp ile altyazı aranıyor... Video ID: {video_id}")
+    print(f"🔍 yt-dlp ile (Android Taklidi) altyazı aranıyor... Video ID: {video_id}")
     url = f"https://www.youtube.com/watch?v={video_id}"
 
-    # yt-dlp ayarları: Videoyu indirme, sadece TR altyazıyı JSON formatında al
+    # Senin bulduğun efsanevi çerezsiz atlatma yöntemi + Altyazı ayarları
     ydl_opts = {
-        'skip_download': True,
+        'skip_download': True,  # Sadece altyazı istiyoruz, video indirme
         'writesubtitles': True,
-        'writeautomaticsub': True,  # Otomatik çevirileri de kabul et (MÜKEMMEL ÖZELLİK)
+        'writeautomaticsub': True,  # Otomatik TR altyazıları da al
         'subtitleslangs': ['tr'],
         'subtitlesformat': 'json3',
+
+        # 🚀 İŞTE YOUTUBE'U KANDIRAN O SİHİRLİ KISIM (Senin Kodun)
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios']
+            }
+        },
+        'user_agent': 'android-app/com.google.android.youtube/19.05.36 (Linux; U; Android 14; tr_TR)',
+
         'quiet': True,
         'no_warnings': True
     }
@@ -124,7 +136,7 @@ def get_caption_with_yta(video_id: str):
                         "end": round(start + duration, 2)
                     })
 
-            print(f"✅ Altyazı yt-dlp ile başarıyla çekildi: {len(captions)} satır.")
+            print(f"✅ Altyazı yt-dlp (Android) ile başarıyla çekildi: {len(captions)} satır.")
             return captions
 
     except Exception as e:
