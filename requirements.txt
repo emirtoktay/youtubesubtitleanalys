@@ -1,6 +1,7 @@
 flask
 flask-cors
-youtube-transcript-api
+yt-dlp
+requests
 tensorflow-cpu
 torch
 transformers
