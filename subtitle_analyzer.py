@@ -72,11 +72,21 @@ def load_svc_model():
 # ===================================================
 # 🔹 ALTYAZI ÇEKME
 # ===================================================
+# ===================================================
+# 🔹 ALTYAZI ÇEKME (GÜNCELLENDİ)
+# ===================================================
 def get_caption_with_yta(video_id: str):
     print(f"🔍 Altyazı aranıyor... Video ID: {video_id}")
     try:
-        lines = YouTubeTranscriptApi.get_transcript(video_id, languages=['tr'])
+        # 💡 YENİ YÖNTEM: Hata veren get_transcript yerine list_transcripts kullanıyoruz
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+
+        # Direkt olarak 'tr' (Türkçe) altyazıyı bul ve çek
+        transcript = transcript_list.find_transcript(['tr'])
+        lines = transcript.fetch()
+
         print(f"✅ Altyazı başarıyla çekildi: {len(lines)} satır.")
+
     except NoTranscriptFound:
         print("⚠️ DİKKAT: Bu videoda Türkçe (tr) altyazı bulunamadı!")
         return []
@@ -91,6 +101,7 @@ def get_caption_with_yta(video_id: str):
     for line in lines:
         text = line['text'].strip()
         if not text or re.fullmatch(r"[\[\(].*[\]\)]", text.strip()): continue
+        # Küfür filtrelemesi
         text = text.replace("[__]", "siktir").replace("[ __ ]", "amk").replace("[\xa0__\xa0]", "amk")
         captions.append({
             "text": text,
@@ -98,7 +109,6 @@ def get_caption_with_yta(video_id: str):
             "end": round(line['start'] + line['duration'], 2)
         })
     return captions
-
 
 # ===================================================
 # 🔹 TAHMİN FONKSİYONLARI (Artık modelleri parametre olarak alıyor)
