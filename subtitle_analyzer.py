@@ -123,45 +123,68 @@ def predict_text_svc(text, model, vectorizer):
 # ===================================================
 # 🔹 ANA ANALİZ FONKSİYONU (SİHİR BURADA GERÇEKLEŞİYOR)
 # ===================================================
+# ===================================================
+# 🔹 ANA ANALİZ FONKSİYONU (SIRALI YÜKLEME VE SİLME)
+# ===================================================
 def analyze_subtitles(video_id):
     captions = get_caption_with_yta(video_id)
     if not captions:
         return None
 
-    # 1. ADIM: İSTEK GELDİ, MODELLERİ YÜKLE
-    print("⏳ Modeller RAM'e yükleniyor...")
-    lstm_m, lstm_t, lstm_le = load_lstm_model()
-    bert_m, bert_t, bert_le, bert_d = load_bert_model()
-    svc_m, svc_v = load_svc_model()
-    print("✅ Modeller yüklendi, analiz başlıyor...")
-
+    total_lines = len(captions)
     safe_counts = {"lstm": 0, "bert": 0, "svc": 0}
 
-    # 2. ADIM: ANALİZİ YAP
-    for c in captions:
-        text = c['text']
-        l_label = predict_text_lstm(text, lstm_m, lstm_t, lstm_le)
-        b_label = predict_text_bert(text, bert_m, bert_t, bert_le, bert_d)
-        s_label = predict_text_svc(text, svc_m, svc_v)
+    print(f"🚀 {total_lines} satır altyazı bulundu. Sıralı analiz başlıyor...")
 
-        if l_label == "OTHER": safe_counts["lstm"] += 1
-        if b_label == "OTHER": safe_counts["bert"] += 1
-        if s_label == "OTHER": safe_counts["svc"] += 1
+    # ---------------------------------------------------
+    # 1. AŞAMA: SADECE LSTM
+    # ---------------------------------------------------
+    print("⏳ 1/3: LSTM Modeli RAM'e yükleniyor...")
+    lstm_m, lstm_t, lstm_le = load_lstm_model()
+    if lstm_m is not None:
+        for c in captions:
+            l_label = predict_text_lstm(c['text'], lstm_m, lstm_t, lstm_le)
+            if l_label == "OTHER":
+                safe_counts["lstm"] += 1
+    print("🧹 LSTM işi bitti, RAM'den siliniyor...")
+    del lstm_m, lstm_t, lstm_le
+    gc.collect()
 
-    total_lines = len(captions)
+    # ---------------------------------------------------
+    # 2. AŞAMA: SADECE BERT (En Ağırı)
+    # ---------------------------------------------------
+    print("⏳ 2/3: BERT Modeli RAM'e yükleniyor...")
+    bert_m, bert_t, bert_le, bert_d = load_bert_model()
+    if bert_m is not None:
+        for c in captions:
+            b_label = predict_text_bert(c['text'], bert_m, bert_t, bert_le, bert_d)
+            if b_label == "OTHER":
+                safe_counts["bert"] += 1
+    print("🧹 BERT işi bitti, RAM'den siliniyor...")
+    del bert_m, bert_t, bert_le, bert_d
+    gc.collect()
 
-    # 3. ADIM: İŞ BİTTİ, MODELLERİ RAM'DEN SİL (TEMİZLİK)
-    print("🧹 Analiz bitti, modeller RAM'den siliniyor...")
-    del lstm_m, bert_m, svc_m
-    del lstm_t, bert_t, svc_v
-    gc.collect()  # Çöp toplayıcıyı zorla çalıştır
-    print("✨ RAM temizlendi.")
+    # ---------------------------------------------------
+    # 3. AŞAMA: SADECE SVC
+    # ---------------------------------------------------
+    print("⏳ 3/3: Linear SVC Modeli RAM'e yükleniyor...")
+    svc_m, svc_v = load_svc_model()
+    if svc_m is not None:
+        for c in captions:
+            s_label = predict_text_svc(c['text'], svc_m, svc_v)
+            if s_label == "OTHER":
+                safe_counts["svc"] += 1
+    print("🧹 SVC işi bitti, RAM'den siliniyor...")
+    del svc_m, svc_v
+    gc.collect()
+
+    print("✨ Tüm analizler bitti, RAM tertemiz!")
 
     return {
         "percentages": {
-            "lstm": round((safe_counts["lstm"] / total_lines) * 100, 2),
-            "bert": round((safe_counts["bert"] / total_lines) * 100, 2),
-            "svc": round((safe_counts["svc"] / total_lines) * 100, 2),
+            "lstm": round((safe_counts["lstm"] / total_lines) * 100, 2) if total_lines > 0 else 100.0,
+            "bert": round((safe_counts["bert"] / total_lines) * 100, 2) if total_lines > 0 else 100.0,
+            "svc": round((safe_counts["svc"] / total_lines) * 100, 2) if total_lines > 0 else 100.0,
         },
         "total_lines": total_lines
     }
