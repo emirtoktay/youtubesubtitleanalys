@@ -16,12 +16,12 @@ from sklearn.preprocessing import LabelEncoder as LSTM_LabelEncoder
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 
-# GPU aramasın, direkt CPU kullansın (Railway için zorunlu)
+# GPU aramasın, direkt CPU kullansın
 tf.config.set_visible_devices([], 'GPU')
 
 
 # ==============================
-# 🔹 MODEL ve DOSYALARI YÜKLEME
+# 🔹 MODEL YÜKLEME FONKSİYONLARI
 # ==============================
 def load_lstm_model():
     try:
@@ -32,34 +32,27 @@ def load_lstm_model():
         le.classes_ = np.array(le_data["classes"])
         with open("tokenizer.json", "r", encoding="utf-8") as f:
             tokenizer = tokenizer_from_json(f.read())
-        print("✅ LSTM Modeli yüklendi.")
         return model, tokenizer, le
     except Exception as e:
-        print(f"❌ LSTM modeli yüklenirken hata: {e}")
+        print(f"❌ LSTM yükleme hatası: {e}")
         return None, None, None
 
 
 def load_bert_model():
     try:
-        # 💡 YENİ: Klasörden değil, direkt senin Hugging Face depodan çekiyor!
         MODEL_DIR = "armud/emir-toxic-bert"
-
         tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
         model = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR)
         model.eval()
         device = torch.device("cpu")
         model.to(device)
-
-        # Label Encoder'ı hala ana klasöründeki json'dan okumaya devam ediyor
         with open("label_encoder.json", "r", encoding="utf-8") as f:
             le_data = json.load(f)
         le = LSTM_LabelEncoder()
         le.classes_ = np.array(le_data["classes"])
-
-        print(f"✅ BERT Modeli Hugging Face'ten yüklendi. (Cihaz: {device})")
         return model, tokenizer, le, device
     except Exception as e:
-        print(f"❌ BERT modeli yüklenirken hata: {e}")
+        print(f"❌ BERT yükleme hatası: {e}")
         return None, None, None, None
 
 
@@ -67,39 +60,28 @@ def load_svc_model():
     try:
         model = joblib.load("linear_svc_model.pkl")
         vectorizer = joblib.load("tfidf_vectorizer.pkl")
-        print("✅ Linear SVC Modeli yüklendi.")
         return model, vectorizer
     except Exception as e:
-        print(f"❌ Linear SVC modeli yüklenirken hata: {e}")
+        print(f"❌ SVC yükleme hatası: {e}")
         return None, None
 
 
-# Sunucu başlarken modelleri 1 kere yüklüyoruz
-LSTM_MODEL, LSTM_TOKENIZER, LSTM_LE = load_lstm_model()
-BERT_MODEL, BERT_TOKENIZER, BERT_LE, BERT_DEVICE = load_bert_model()
-SVC_MODEL, SVC_VECTORIZER = load_svc_model()
-
-
 # ===================================================
-# 🔹 ALTYAZI ÇEKME (DÜZELTİLDİ)
+# 🔹 ALTYAZI ÇEKME
 # ===================================================
 def get_caption_with_yta(video_id: str):
     try:
-        # Hata buradaydı, doğru kullanım bu şekilde:
         lines = YouTubeTranscriptApi.get_transcript(video_id, languages=['tr'])
     except NoTranscriptFound:
-        print(f"⚠️ Türkçe altyazı bulunamadı ({video_id}).")
         return []
     except TranscriptsDisabled:
-        print(f"⚠️ Altyazılar bu video için kapalı ({video_id}).")
         return []
     except Exception as e:
-        print(f"⚠️ Altyazı çekerken bilinmeyen hata: {e}")
         return []
 
     captions = []
     for line in lines:
-        text = line['text'].strip()  # 'text' bir dictionary key'idir
+        text = line['text'].strip()
         if not text or re.fullmatch(r"[\[\(].*[\]\)]", text.strip()): continue
         text = text.replace("[__]", "siktir").replace("[ __ ]", "amk").replace("[\xa0__\xa0]", "amk")
         captions.append({
@@ -111,62 +93,70 @@ def get_caption_with_yta(video_id: str):
 
 
 # ===================================================
-# 🔹 TAHMİN FONKSİYONLARI
+# 🔹 TAHMİN FONKSİYONLARI (Artık modelleri parametre olarak alıyor)
 # ===================================================
-def predict_text_lstm(text):
-    if LSTM_MODEL is None: return "MODEL_HATA", 0.0
-    seq = LSTM_TOKENIZER.texts_to_sequences([text])
+def predict_text_lstm(text, model, tokenizer, le):
+    if model is None: return "MODEL_HATA"
+    seq = tokenizer.texts_to_sequences([text])
     padded = pad_sequences(seq, maxlen=100, padding='post', truncating='post')
-    preds = LSTM_MODEL.predict(padded, verbose=0)
+    preds = model.predict(padded, verbose=0)
     label_index = np.argmax(preds)
-    return LSTM_LE.inverse_transform([label_index])[0], float(np.max(preds))
+    return le.inverse_transform([label_index])[0]
 
 
-def predict_text_bert(text):
-    if BERT_MODEL is None: return "MODEL_HATA", 0.0
-    inputs = BERT_TOKENIZER(text, return_tensors="pt", truncation=True, padding=True, max_length=128).to(BERT_DEVICE)
+def predict_text_bert(text, model, tokenizer, le, device):
+    if model is None: return "MODEL_HATA"
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=128).to(device)
     with torch.no_grad():
-        outputs = BERT_MODEL(**inputs)
+        outputs = model(**inputs)
         probs = torch.softmax(outputs.logits, dim=1).cpu().numpy()[0]
     label_index = np.argmax(probs)
-    return BERT_LE.inverse_transform([label_index])[0], float(np.max(probs))
+    return le.inverse_transform([label_index])[0]
 
 
-def predict_text_svc(text):
-    if SVC_MODEL is None: return "MODEL_HATA", 0.0
-    vec = SVC_VECTORIZER.transform([text])
-    label = SVC_MODEL.predict(vec)[0]
-    try:
-        conf = float(np.max(SVC_MODEL.decision_function(vec)))
-    except Exception:
-        conf = 0.0
-    return label, conf
+def predict_text_svc(text, model, vectorizer):
+    if model is None: return "MODEL_HATA"
+    vec = vectorizer.transform([text])
+    return model.predict(vec)[0]
 
 
 # ===================================================
-# 🔹 ANA ANALİZ FONKSİYONU
+# 🔹 ANA ANALİZ FONKSİYONU (SİHİR BURADA GERÇEKLEŞİYOR)
 # ===================================================
 def analyze_subtitles(video_id):
     captions = get_caption_with_yta(video_id)
     if not captions:
         return None
 
+    # 1. ADIM: İSTEK GELDİ, MODELLERİ YÜKLE
+    print("⏳ Modeller RAM'e yükleniyor...")
+    lstm_m, lstm_t, lstm_le = load_lstm_model()
+    bert_m, bert_t, bert_le, bert_d = load_bert_model()
+    svc_m, svc_v = load_svc_model()
+    print("✅ Modeller yüklendi, analiz başlıyor...")
+
     safe_counts = {"lstm": 0, "bert": 0, "svc": 0}
 
+    # 2. ADIM: ANALİZİ YAP
     for c in captions:
         text = c['text']
-        l_label, _ = predict_text_lstm(text)
-        b_label, _ = predict_text_bert(text)
-        s_label, _ = predict_text_svc(text)
+        l_label = predict_text_lstm(text, lstm_m, lstm_t, lstm_le)
+        b_label = predict_text_bert(text, bert_m, bert_t, bert_le, bert_d)
+        s_label = predict_text_svc(text, svc_m, svc_v)
 
         if l_label == "OTHER": safe_counts["lstm"] += 1
         if b_label == "OTHER": safe_counts["bert"] += 1
         if s_label == "OTHER": safe_counts["svc"] += 1
 
-    # İşlem bittikten sonra RAM'i rahatlat
-    gc.collect()
-
     total_lines = len(captions)
+
+    # 3. ADIM: İŞ BİTTİ, MODELLERİ RAM'DEN SİL (TEMİZLİK)
+    print("🧹 Analiz bitti, modeller RAM'den siliniyor...")
+    del lstm_m, bert_m, svc_m
+    del lstm_t, bert_t, svc_v
+    gc.collect()  # Çöp toplayıcıyı zorla çalıştır
+    print("✨ RAM temizlendi.")
+
     return {
         "percentages": {
             "lstm": round((safe_counts["lstm"] / total_lines) * 100, 2),
