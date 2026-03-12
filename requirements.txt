@@ -1,0 +1,11 @@
+flask
+flask-cors
+youtube-transcript-api
+tensorflow-cpu
+torch
+transformers
+scikit-learn
+joblib
+numpy
+psycopg2-binary
+gunicorn
