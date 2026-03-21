@@ -85,26 +85,18 @@ def get_caption_with_yta(video_id: str):
         'writeautomaticsub': True,
         'subtitleslangs': ['tr'],
         'subtitlesformat': 'json3',
-
-        # 🚀 YOUTUBE'UN "BOT MUSUN?" KONTROLÜNÜ AŞAN YENİ AYARLAR
         'extractor_args': {
             'youtube': {
-                # Sadece Android yetmez, tüm istemcileri dene ki biri mutlaka geçsin
-                'player_client': ['android', 'ios', 'web', 'mweb'],
-                # Gereksiz sayfa kontrollerini atla
+                'player_client': ['ios', 'android', 'mweb'],
+                # PO Token hatasını aşmak için eklenen kısım:
+                'po_token': ['web+1'],
                 'player_skip': ['webpage', 'configs']
             }
         },
-
-        # Daha modern bir User-Agent (Sanki gerçek bir tarayıcıymış gibi)
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-
-        'quiet': True,
-        'no_warnings': True,
+        # User agent'ı en güncel Chrome yapalım
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         'nocheckcertificate': True,
-        'geo_bypass': True
     }
-
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             # YouTube bazen IP'yi mimlediği için extract_info'yu dikkatli çağırıyoruz
