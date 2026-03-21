@@ -72,59 +72,66 @@ def load_svc_model():
 # ===================================================
 # 🔹 ALTYAZI ÇEKME (YT-DLP + ANDROID TAKLİDİ!)
 # ===================================================
+# ===================================================
+# 🔹 ALTYAZI ÇEKME (YT-DLP + ANDROID & IOS & WEB TAKLİDİ!)
+# ===================================================
 def get_caption_with_yta(video_id: str):
-    print(f"🔍 yt-dlp ile (Android Taklidi) altyazı aranıyor... Video ID: {video_id}")
+    print(f"🔍 yt-dlp ile Gelişmiş Atlatma Yöntemi deneniyor... Video ID: {video_id}")
     url = f"https://www.youtube.com/watch?v={video_id}"
 
-    # Senin bulduğun efsanevi çerezsiz atlatma yöntemi + Altyazı ayarları
     ydl_opts = {
-        'skip_download': True,  # Sadece altyazı istiyoruz, video indirme
+        'skip_download': True,
         'writesubtitles': True,
-        'writeautomaticsub': True,  # Otomatik TR altyazıları da al
+        'writeautomaticsub': True,
         'subtitleslangs': ['tr'],
         'subtitlesformat': 'json3',
 
-        # 🚀 İŞTE YOUTUBE'U KANDIRAN O SİHİRLİ KISIM (Senin Kodun)
+        # 🚀 YOUTUBE'UN "BOT MUSUN?" KONTROLÜNÜ AŞAN YENİ AYARLAR
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'ios']
+                # Sadece Android yetmez, tüm istemcileri dene ki biri mutlaka geçsin
+                'player_client': ['android', 'ios', 'web', 'mweb'],
+                # Gereksiz sayfa kontrollerini atla
+                'player_skip': ['webpage', 'configs']
             }
         },
-        'user_agent': 'android-app/com.google.android.youtube/19.05.36 (Linux; U; Android 14; tr_TR)',
+
+        # Daha modern bir User-Agent (Sanki gerçek bir tarayıcıymış gibi)
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
 
         'quiet': True,
-        'no_warnings': True
+        'no_warnings': True,
+        'nocheckcertificate': True,
+        'geo_bypass': True
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # YouTube bazen IP'yi mimlediği için extract_info'yu dikkatli çağırıyoruz
             info = ydl.extract_info(url, download=False)
 
-            # Altyazı var mı kontrol et
             subs = info.get('requested_subtitles', {})
             if not subs or 'tr' not in subs:
-                print("⚠️ DİKKAT: Bu videoda normal veya otomatik Türkçe (tr) altyazı bulunamadı!")
+                print("⚠️ DİKKAT: Türkçe altyazı bulunamadı!")
                 return []
 
-            # Altyazı dosyasının JSON linkini al
             sub_url = subs['tr'].get('url')
             if not sub_url:
                 return []
 
-            # Linkten JSON verisini anında indir ve parçala
-            resp = requests.get(sub_url)
+            # Zaman aşımı ekleyerek (timeout) daha güvenli istek atalım
+            resp = requests.get(sub_url, timeout=15)
             data = resp.json()
 
             captions = []
             for event in data.get('events', []):
                 if 'segs' in event:
-                    # Kelimeleri birleştirip tek satır yap
                     text = "".join([seg.get('utf8', '') for seg in event['segs']]).strip()
 
                     if not text or re.fullmatch(r"[\[\(].*[\]\)]", text.strip()):
                         continue
 
-                    # Küfür filtrelemesi
+                    # Küfür düzeltmeleri (Senin kodundaki mantık)
                     text = text.replace("[__]", "siktir").replace("[ __ ]", "amk").replace("[\xa0__\xa0]", "amk")
 
                     start = event.get('tStartMs', 0) / 1000.0
@@ -136,11 +143,11 @@ def get_caption_with_yta(video_id: str):
                         "end": round(start + duration, 2)
                     })
 
-            print(f"✅ Altyazı yt-dlp (Android) ile başarıyla çekildi: {len(captions)} satır.")
+            print(f"✅ Başarıyla çekildi: {len(captions)} satır.")
             return captions
 
     except Exception as e:
-        print(f"⚠️ DİKKAT: yt-dlp altyazı çekerken hata fırlattı: {e}")
+        print(f"⚠️ DİKKAT: yt-dlp hala 'Sign in' diyorsa YouTube IP'yi bloklamış olabilir: {e}")
         return []
 
 # ===================================================
