@@ -1,0 +1,13 @@
+flask
+flask-cors
+youtube-transcript-api==0.6.2
+yt-dlp
+tensorflow-cpu
+torch
+transformers
+scikit-learn
+joblib
+numpy
+pg8000
+gunicorn
+requests
