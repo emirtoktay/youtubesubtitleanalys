@@ -218,7 +218,73 @@ def get_plan_c_captions(video_id):
     print("🛑 PLAN C (Tüm Ayna Sunucular) başarısız oldu.")
     return []
 
+# ===================================================
+# 🔹 PLAN D: YOUTUBE HTML PARSE (COOKIE YOK)
+# ===================================================
+def get_plan_d_captions(video_id):
+    print(f"🧠 [PLAN D] YouTube HTML parse yöntemi deneniyor... ({video_id})")
 
+    url = f"https://www.youtube.com/watch?v={video_id}"
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://www.google.com/"
+    }
+
+    try:
+        html = requests.get(url, headers=headers, timeout=10).text
+
+        match = re.search(r"ytInitialPlayerResponse\s*=\s*({.+?});", html)
+        if not match:
+            print("❌ Player response bulunamadı")
+            return []
+
+        data = json.loads(match.group(1))
+
+        tracks = data.get("captions", {}).get("playerCaptionsTracklistRenderer", {}).get("captionTracks", [])
+        if not tracks:
+            print("❌ Altyazı yok")
+            return []
+
+        track = None
+        for t in tracks:
+            if t.get("languageCode") == "tr":
+                track = t
+                break
+        if not track:
+            track = tracks[0]
+
+        caption_url = track.get("baseUrl")
+        if not caption_url:
+            return []
+
+        caption_url += "&fmt=json3"
+
+        res = requests.get(caption_url, headers=headers, timeout=10)
+        data = res.json()
+
+        captions = []
+        for event in data.get("events", []):
+            if "segs" in event:
+                text = "".join(seg.get("utf8", "") for seg in event["segs"]).strip()
+                if text:
+                    start = event.get("tStartMs", 0) / 1000
+                    duration = event.get("dDurationMs", 0) / 1000
+                    captions.append({
+                        "text": text,
+                        "start": round(start, 2),
+                        "end": round(start + duration, 2)
+                    })
+
+        if captions:
+            print(f"✅ PLAN D Başarılı: {len(captions)} satır çekildi.")
+            return captions
+
+    except Exception as e:
+        print(f"⚠️ PLAN D hata verdi: {e}")
+
+    return []
 # ===================================================
 # 🔹 ANA ÇEKİCİ (3 MOTORU DA SIRAYLA DENER)
 # ===================================================
@@ -229,19 +295,24 @@ def get_caption_with_yta(video_id: str):
         print(f"✅ PLAN A Başarılı: {len(captions)} satır çekildi.")
         return captions
 
-    print(f"⚠️ PLAN A İşe Yaramadı. 🔍 [PLAN B] yt-dlp Android/iOS taklidi ateşleniyor... ({video_id})")
+    print(f"⚠️ PLAN A İşe Yaramadı. 🔍 [PLAN B] yt-dlp deneniyor...")
     captions = get_ytdlp_captions(video_id)
     if captions:
         print(f"✅ PLAN B Başarılı: {len(captions)} satır çekildi.")
         return captions
 
-    print(f"⚠️ PLAN B İşe Yaramadı. 🌍 [PLAN C] Harici Sunucu Proxy'leri ateşleniyor... ({video_id})")
+    print(f"⚠️ PLAN B İşe Yaramadı. 🌍 [PLAN C] piped deneniyor...")
     captions = get_plan_c_captions(video_id)
     if captions:
-        print(f"✅ PLAN C Başarılı: {len(captions)} satır ayna sunucudan çekildi.")
+        print(f"✅ PLAN C Başarılı.")
         return captions
 
-    print("🛑 Bütün motorlar YouTube engeline takıldı.")
+    print(f"⚠️ PLAN C İşe Yaramadı. 🧠 [PLAN D] HTML parse deneniyor...")
+    captions = get_plan_d_captions(video_id)
+    if captions:
+        return captions
+
+    print("🛑 TÜM PLANLAR FAIL (IP BAN olabilir)")
     return []
 
 
