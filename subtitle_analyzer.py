@@ -4,10 +4,8 @@ import gc
 import requests
 import numpy as np
 import joblib
-import concurrent.futures
 
-# ÇİFT MOTORLU + AYNA SUNUCU SİSTEMİ
-from youtube_transcript_api import YouTubeTranscriptApi
+# SADECE PLAN B: YT-DLP
 import yt_dlp
 
 # Model 1: LSTM
@@ -71,48 +69,6 @@ def load_svc_model():
 
 
 # ===================================================
-# 🔹 ALTYAZI ÇEKME (PLAN A: YTA API - ÇEREZSİZ)
-# ===================================================
-def fetch_api(video_id):
-    return YouTubeTranscriptApi.list_transcripts(video_id)
-
-
-def get_yta_captions(video_id):
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(fetch_api, video_id)
-            transcript_list = future.result(timeout=10)
-
-        transcript = None
-        try:
-            transcript = transcript_list.find_transcript(['tr'])
-        except:
-            try:
-                transcript = transcript_list.find_generated_transcript(['tr'])
-            except:
-                for t in transcript_list:
-                    if t.is_translatable:
-                        transcript = t.translate('tr')
-                        break
-        if not transcript: return []
-
-        data = transcript.fetch()
-        captions = []
-        for item in data:
-            text = item.get('text', '').strip()
-            if not text or re.fullmatch(r"[\[\(].*[\]\)]", text): continue
-            text = text.replace("[__]", "siktir").replace("[ __ ]", "amk").replace("[\xa0__\xa0]", "amk").replace("\n",
-                                                                                                                  " ")
-            start = float(item.get('start', 0))
-            duration = float(item.get('duration', 0))
-            captions.append({"text": text, "start": round(start, 2), "end": round(start + duration, 2)})
-        return captions
-    except Exception as e:
-        print(f"⚠️ YTA API başarısız oldu: {e}")
-        return []
-
-
-# ===================================================
 # 🔹 ALTYAZI ÇEKME (PLAN B: YT-DLP ANDROID TAKLİDİ)
 # ===================================================
 def get_ytdlp_captions(video_id):
@@ -151,173 +107,12 @@ def get_ytdlp_captions(video_id):
                     captions.append({"text": text, "start": round(start, 2), "end": round(start + duration, 2)})
             return captions
     except Exception as e:
-        print(f"⚠️ YT-DLP Android taklidi de başarısız oldu: {e}")
+        print(f"⚠️ YT-DLP Android taklidi başarısız oldu: {e}")
         return []
 
 
 # ===================================================
-# 🔹 ALTYAZI ÇEKME (PLAN C: FARKLI SUNUCULAR - PIPED API)
-# ===================================================
-def get_plan_c_captions(video_id):
-    print(f"🌍 [PLAN C] Alternatif Ayna Sunucular (Piped API) deneniyor... ({video_id})")
-
-    instances = [
-        "https://pipedapi.kavin.rocks",
-        "https://pipedapi.tokhmi.xyz",
-        "https://pipedapi.smnz.de"
-    ]
-
-    for base_url in instances:
-        try:
-            print(f"🔄 İstek atılıyor: {base_url} ...")
-            api_url = f"{base_url}/streams/{video_id}"
-            resp = requests.get(api_url, timeout=10)
-            if resp.status_code != 200:
-                continue
-
-            data = resp.json()
-            subtitles = data.get('subtitles', [])
-
-            tr_url = None
-            for sub in subtitles:
-                if sub.get('code') == 'tr' or 'Turkish' in sub.get('name', ''):
-                    tr_url = sub.get('url')
-                    break
-
-            if not tr_url:
-                continue
-
-            sub_resp = requests.get(tr_url, timeout=10)
-            vtt_text = sub_resp.text
-
-            captions = []
-            blocks = re.split(r'\n\n+', vtt_text)
-
-            for block in blocks:
-                lines = block.strip().split('\n')
-                time_line = ""
-                text_lines = []
-                for line in lines:
-                    if '-->' in line:
-                        time_line = line
-                    elif time_line and line.strip() and not line.startswith('WEBVTT'):
-                        text_lines.append(line.strip())
-
-                if time_line and text_lines:
-                    text = " ".join(text_lines)
-                    text = re.sub(r'<[^>]+>', '', text)
-                    text = text.replace("[__]", "siktir").replace("[ __ ]", "amk")
-                    captions.append({"text": text, "start": 0.0, "end": 0.0})
-
-            if captions:
-                return captions
-        except Exception as e:
-            print(f"⚠️ Sunucu ({base_url}) hata verdi: {e}. Diğerine geçiliyor...")
-            continue
-
-    print("🛑 PLAN C (Tüm Ayna Sunucular) başarısız oldu.")
-    return []
-
-# ===================================================
-# 🔹 PLAN D: YOUTUBE HTML PARSE (COOKIE YOK)
-# ===================================================
-def get_plan_d_captions(video_id):
-    print(f"🧠 [PLAN D] YouTube HTML parse yöntemi deneniyor... ({video_id})")
-
-    url = f"https://www.youtube.com/watch?v={video_id}"
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": "https://www.google.com/"
-    }
-
-    try:
-        html = requests.get(url, headers=headers, timeout=10).text
-
-        match = re.search(r"ytInitialPlayerResponse\s*=\s*({.+?});", html)
-        if not match:
-            print("❌ Player response bulunamadı")
-            return []
-
-        data = json.loads(match.group(1))
-
-        tracks = data.get("captions", {}).get("playerCaptionsTracklistRenderer", {}).get("captionTracks", [])
-        if not tracks:
-            print("❌ Altyazı yok")
-            return []
-
-        track = None
-        for t in tracks:
-            if t.get("languageCode") == "tr":
-                track = t
-                break
-        if not track:
-            track = tracks[0]
-
-        caption_url = track.get("baseUrl")
-        if not caption_url:
-            return []
-
-        caption_url += "&fmt=json3"
-
-        res = requests.get(caption_url, headers=headers, timeout=10)
-        data = res.json()
-
-        captions = []
-        for event in data.get("events", []):
-            if "segs" in event:
-                text = "".join(seg.get("utf8", "") for seg in event["segs"]).strip()
-                if text:
-                    start = event.get("tStartMs", 0) / 1000
-                    duration = event.get("dDurationMs", 0) / 1000
-                    captions.append({
-                        "text": text,
-                        "start": round(start, 2),
-                        "end": round(start + duration, 2)
-                    })
-
-        if captions:
-            print(f"✅ PLAN D Başarılı: {len(captions)} satır çekildi.")
-            return captions
-
-    except Exception as e:
-        print(f"⚠️ PLAN D hata verdi: {e}")
-
-    return []
-# ===================================================
-# 🔹 ANA ÇEKİCİ (3 MOTORU DA SIRAYLA DENER)
-# ===================================================
-def get_caption_with_yta(video_id: str):
-    print(f"🔍 [PLAN A] youtube-transcript-api deneniyor... ({video_id})")
-    captions = get_yta_captions(video_id)
-    if captions:
-        print(f"✅ PLAN A Başarılı: {len(captions)} satır çekildi.")
-        return captions
-
-    print(f"⚠️ PLAN A İşe Yaramadı. 🔍 [PLAN B] yt-dlp deneniyor...")
-    captions = get_ytdlp_captions(video_id)
-    if captions:
-        print(f"✅ PLAN B Başarılı: {len(captions)} satır çekildi.")
-        return captions
-
-    print(f"⚠️ PLAN B İşe Yaramadı. 🌍 [PLAN C] piped deneniyor...")
-    captions = get_plan_c_captions(video_id)
-    if captions:
-        print(f"✅ PLAN C Başarılı.")
-        return captions
-
-    print(f"⚠️ PLAN C İşe Yaramadı. 🧠 [PLAN D] HTML parse deneniyor...")
-    captions = get_plan_d_captions(video_id)
-    if captions:
-        return captions
-
-    print("🛑 TÜM PLANLAR FAIL (IP BAN olabilir)")
-    return []
-
-
-# ===================================================
-# 🔹 TAHMİN FONKSİYONLARI VE ANA ANALİZ
+# 🔹 TAHMİN FONKSİYONLARI
 # ===================================================
 def predict_text_lstm(text, model, tokenizer, le):
     if model is None: return "MODEL_HATA"
@@ -344,9 +139,15 @@ def predict_text_svc(text, model, vectorizer):
     return model.predict(vec)[0]
 
 
+# ===================================================
+# 🔹 ANA ANALİZ FONKSİYONU
+# ===================================================
 def analyze_subtitles(video_id):
-    captions = get_caption_with_yta(video_id)
+    print(f"🔍 [PLAN B] yt-dlp ile altyazı çekiliyor... ({video_id})")
+    captions = get_ytdlp_captions(video_id)
+
     if not captions:
+        print("🛑 Altyazı çekilemedi.")
         return None
 
     total_lines = len(captions)
@@ -372,7 +173,7 @@ def analyze_subtitles(video_id):
     del bert_m, bert_t, bert_le, bert_d
     gc.collect()
 
-    print("⏳ 3 /3: Linear SVC Modeli RAM'e yükleniyor...")
+    print("⏳ 3/3: Linear SVC Modeli RAM'e yükleniyor...")
     svc_m, svc_v = load_svc_model()
     if svc_m is not None:
         for c in captions:

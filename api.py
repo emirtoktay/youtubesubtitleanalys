@@ -1,8 +1,9 @@
 import re
-import threading  # Eşzamanlı istekleri engellemek için
+import threading  # Eşzamanlı istekleri ve sırayı yönetmek için
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
+import yt_dlp  # Video süresi kontrolü için eklendi
 
 # SADECE GEREKLİ MODÜLLER KALDI (Görsel analizler silindi)
 import subtitle_analyzer
@@ -12,10 +13,14 @@ app = Flask(__name__)
 CORS(app)
 
 # ===================================================
-# 🔹 KİLİT MEKANİZMASI (Aynı anda aynı videoyu analiz etmeyi önler)
+# 🔹 KİLİT VE KUYRUK MEKANİZMALARI
 # ===================================================
+# 1. Aynı videonun aynı anda birden fazla kez analiz edilmesini önler
 active_analyses = set()
 analysis_lock = threading.Lock()
+
+# 2. YENİ: Farklı videoların aynı anda işlenmesini engeller. Sırada bekletir. (Fatura ve RAM koruması)
+global_process_lock = threading.Lock()
 
 
 # ===================================================
@@ -30,6 +35,24 @@ def extract_video_id(link: str):
 
 def get_canonical_url(video_id: str):
     return f"https://www.youtube.com/watch?v={video_id}"
+
+
+# --- YENİ EKLENEN: VİDEO SÜRESİ KONTROLÜ ---
+def get_video_duration(video_id: str):
+    try:
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'skip_download': True,
+            'extract_flat': True # Sadece temel veriyi hızlıca çekmek için
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            return info.get('duration', 0)  # Saniye cinsinden döner
+    except Exception as e:
+        print(f"⚠️ Süre çekilemedi: {e}")
+        return 0  # Hata olursa engellememek için 0 döner
 
 
 def calculate_age_rating(text_scores, visual_scores):
@@ -90,18 +113,17 @@ def analyze_youtube():
         video_id = extract_video_id(link)
         canonical_url = get_canonical_url(video_id)
 
-        # 1. DB KONTROLÜ
+        # 1. DB KONTROLÜ (Çok hızlı olduğu için sıra beklemez)
         cached_result = db_manager.check_db_for_result(canonical_url)
         if cached_result:
             text_scores = cached_result.get('safety_percentages', {})
-            # Cache'den gelen görsel veriler veya boş dict
             visual_scores = cached_result.get('safety_percentages', {}).get('visual', {})
             age_rating = calculate_age_rating(text_scores, visual_scores)
             cached_result['age_rating'] = age_rating
             return jsonify(cached_result)
 
         # ----------------------------------------------------
-        # 🛡️ KİLİT MEKANİZMASI KONTROLÜ
+        # 🛡️ KİLİT MEKANİZMASI KONTROLÜ (Aynı video analizi)
         # ----------------------------------------------------
         with analysis_lock:
             if video_id in active_analyses:
@@ -109,43 +131,54 @@ def analyze_youtube():
             active_analyses.add(video_id)
 
         try:
-            # --- 2. SADECE METİN ANALİZİ (GÖRSEL İPTAL) ---
-            print(f"📝 Sadece Altyazı analizi yapılıyor... ({video_id})")
-            sub_results = subtitle_analyzer.analyze_subtitles(video_id)
+            # --- 2. YENİ: 30 DAKİKA (1800 SANİYE) SINIRI KONTROLÜ ---
+            duration = get_video_duration(video_id)
+            if duration > 1800:
+                return jsonify({
+                    "status": "error",
+                    "error": "Bu video çok uzun. Şu an için sadece 30 dakikadan kısa videolar analiz edilebilmektedir."
+                }), 400
 
-            if sub_results:
-                text_percentages = sub_results["percentages"]
-                total_lines = sub_results["total_lines"]
-            else:
-                text_percentages = {"lstm": 100.0, "bert": 100.0, "svc": 100.0}
-                total_lines = 0
+            # --- 3. YENİ: SIRA BEKLEME NOKTASI (Kuyruk) ---
+            # İstek buraya gelince, eğer içeride başka bir analiz yapılıyorsa burada bekler.
+            # İçerideki işlem bitince sıradaki videoya geçer.
+            with global_process_lock:
+                print(f"📝 Sıra Geldi! Altyazı analizi başlıyor... ({video_id})")
+                sub_results = subtitle_analyzer.analyze_subtitles(video_id)
 
-            # Görsel analiz iptal edildiği için veritabanına gönderilecek sahte "temiz" veriler
-            visual_results = {
-                "gun_safety": 100.0, "knife_safety": 100.0, "gun_det": 0, "knife_det": 0,
-                "combined_gun_safety": 100.0, "combined_knife_safety": 100.0,
-                "combined_gun_det": 0, "combined_knife_det": 0,
-                "gambling_safety": 100.0, "gambling_det": 0
-            }
+                if sub_results:
+                    text_percentages = sub_results["percentages"]
+                    total_lines = sub_results["total_lines"]
+                else:
+                    text_percentages = {"lstm": 100.0, "bert": 100.0, "svc": 100.0}
+                    total_lines = 0
 
-            # --- 3. DB'ye KAYDETME ---
-            try:
-                db_manager.save_result_to_db(canonical_url, video_id, total_lines, text_percentages, visual_results)
-            except Exception as db_err:
-                print(f"❌ DB yazma hatası: {db_err}")
+                # Görsel analiz iptal edildiği için veritabanına gönderilecek sahte "temiz" veriler
+                visual_results = {
+                    "gun_safety": 100.0, "knife_safety": 100.0, "gun_det": 0, "knife_det": 0,
+                    "combined_gun_safety": 100.0, "combined_knife_safety": 100.0,
+                    "combined_gun_det": 0, "combined_knife_det": 0,
+                    "gambling_safety": 100.0, "gambling_det": 0
+                }
 
-            age_rating = calculate_age_rating(text_percentages, visual_results)
+                # --- 4. DB'ye KAYDETME ---
+                try:
+                    db_manager.save_result_to_db(canonical_url, video_id, total_lines, text_percentages, visual_results)
+                except Exception as db_err:
+                    print(f"❌ DB yazma hatası: {db_err}")
 
-            # Eklentiye giden nihai cevap
-            return jsonify({
-                "status": "success",
-                "total_lines": total_lines,
-                "safety_percentages": text_percentages,
-                "age_rating": age_rating
-            })
+                age_rating = calculate_age_rating(text_percentages, visual_results)
+
+                # Eklentiye giden nihai cevap
+                return jsonify({
+                    "status": "success",
+                    "total_lines": total_lines,
+                    "safety_percentages": text_percentages,
+                    "age_rating": age_rating
+                })
 
         finally:
-            # 🔓 İŞLEM BİTTİĞİNDE KİLİDİ AÇ
+            # 🔓 İŞLEM BİTTİĞİNDE VEYA HATA OLDUĞUNDA KİLİDİ AÇ
             with analysis_lock:
                 if video_id in active_analyses:
                     active_analyses.remove(video_id)
