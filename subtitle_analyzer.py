@@ -301,7 +301,7 @@ def analyze_subtitles(video_id):
     del bert_m, bert_t, bert_le, bert_d
     gc.collect()
 
-    print("⏳ 3/3: Linear SVC Modeli RAM'e yükleniyor...")
+    print("⏳ 3 /3: Linear SVC Modeli RAM'e yükleniyor...")
     svc_m, svc_v = load_svc_model()
     if svc_m is not None:
         for c in captions:
