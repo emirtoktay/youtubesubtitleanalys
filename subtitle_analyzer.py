@@ -4,6 +4,7 @@ import gc
 import os
 import numpy as np
 import joblib
+import concurrent.futures  # YENİ: Gölge ban koruması ve zaman aşımı için
 
 # YENİ SİLAHIMIZ
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -70,22 +71,41 @@ def load_svc_model():
 
 
 # ===================================================
-# 🔹 ALTYAZI ÇEKME (API + AKILLI COOKIE KONTROLÜ)
+# 🔹 ALTYAZI ÇEKME (ZIRHLI & ÇEREZSİZ VERSİYON)
 # ===================================================
+def fetch_api(video_id):
+    """Sadece API'ye istek atan saf fonksiyon (Thread içinde çalışacak)"""
+    if os.path.exists('cookies.txt'):
+        return YouTubeTranscriptApi.list_transcripts(video_id, cookies='cookies.txt')
+    else:
+        return YouTubeTranscriptApi.list_transcripts(video_id)
+
+
 def get_caption_with_yta(video_id: str):
     print(f"🔍 youtube-transcript-api ile altyazı aranıyor... Video ID: {video_id}")
 
+    transcript_list = None
+
+    # 🛡️ GÖLGE BAN (SHADOWBAN) KORUMASI: 10 Saniye Şalteri
     try:
-        # Klasörde sahte hesap çerezi (cookies.txt) var mı kontrol et
-        if os.path.exists('cookies.txt'):
-            print("🍪 cookies.txt bulundu, sahte kimlikle bağlanılıyor...")
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id, cookies='cookies.txt')
-        else:
-            print("🌐 Çerez yok, anonim bağlanılıyor...")
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(fetch_api, video_id)
+            # 10 saniye bekle, YouTube cevap vermezse işlemi öldür!
+            transcript_list = future.result(timeout=10)
 
+    except concurrent.futures.TimeoutError:
+        print("🛑 KORUMA DEVREDE: YouTube gölge ban uyguluyor (asılı kalma). Sunucu kilitlenmesi başarıyla önlendi!")
+        return []
+    except Exception as e:
+        print(f"⚠️ Altyazı listesi çekilemedi. Hata: {e}")
+        return []
+
+    if not transcript_list:
+        return []
+
+    try:
         transcript = None
-
+        # Önce Türkçe ara, yoksa otomatik oluşturulan Türkçe, o da yoksa İngilizceyi çevir
         try:
             transcript = transcript_list.find_transcript(['tr'])
         except:
@@ -127,7 +147,7 @@ def get_caption_with_yta(video_id: str):
         return captions
 
     except Exception as e:
-        print(f"⚠️ Altyazı çekilemedi. Hata: {e}")
+        print(f"⚠️ Altyazı verisi okunurken hata: {e}")
         return []
 
 
