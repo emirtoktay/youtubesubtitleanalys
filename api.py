@@ -57,21 +57,22 @@ def get_video_duration(video_id: str):
 
 def calculate_age_rating(text_scores, visual_scores):
     # ---------------------------------------------------------
-    # 1. METİN (ALTYAZI) ANALİZİ YAŞ HESAPLAMASI
+    # 1. METİN (ALTYAZI) ANALİZİ YAŞ HESAPLAMASI (SADECE LSTM VE SVC)
     # ---------------------------------------------------------
     lstm = text_scores.get('lstm', 100.0)
-    bert = text_scores.get('bert', 100.0)
     svc = text_scores.get('svc', 100.0)
 
-    t_scores = [lstm, bert, svc]
+    # API burada BERT'i kaale almıyor! Sadece ikisini değerlendiriyoruz.
+    t_scores = [lstm, svc]
 
-    if sum(1 for s in t_scores if s >= 90) >= 2:
+    # Artık 2 motorumuz olduğu için, ikisinin de o puanı geçmesini istiyoruz (== 2)
+    if sum(1 for s in t_scores if s >= 90) == 2:
         text_age = 7
-    elif sum(1 for s in t_scores if s >= 85) >= 2:
+    elif sum(1 for s in t_scores if s >= 85) == 2:
         text_age = 9
-    elif sum(1 for s in t_scores if s >= 75) >= 2:
+    elif sum(1 for s in t_scores if s >= 75) == 2:
         text_age = 13
-    elif sum(1 for s in t_scores if s >= 60) >= 2:
+    elif sum(1 for s in t_scores if s >= 60) == 2:
         text_age = 15
     else:
         text_age = 18
@@ -79,7 +80,7 @@ def calculate_age_rating(text_scores, visual_scores):
     # ---------------------------------------------------------
     # 2. GÖRSEL ANALİZ YAŞ HESAPLAMASI (ŞU AN DEVRE DIŞI - HEP 7 DÖNECEK)
     # ---------------------------------------------------------
-    visual_age = 7  # Görsel analiz iptal edildiği için varsayılan güvenli değer
+    visual_age = 7
 
     # ---------------------------------------------------------
     # 3. FİNAL YAŞ SINIRI KARARI

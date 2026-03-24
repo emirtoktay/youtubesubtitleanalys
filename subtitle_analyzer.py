@@ -4,7 +4,7 @@ import gc
 import requests
 import numpy as np
 import joblib
-import os # Bunu en üste eklemeyi unutma
+
 # SADECE PLAN B: YT-DLP
 import yt_dlp
 
@@ -15,9 +15,7 @@ from tensorflow.keras.preprocessing.text import tokenizer_from_json
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from sklearn.preprocessing import LabelEncoder as LSTM_LabelEncoder
 
-# Model 2: BERT
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-import torch
+# Model 2: BERT'İ TAMAMEN KALDIRDIK 🗑️
 
 tf.config.set_visible_devices([], 'GPU')
 
@@ -40,36 +38,6 @@ def load_lstm_model():
         return None, None, None
 
 
-def load_bert_model():
-    try:
-        MODEL_DIR = "armud/emir-toxic-bert"
-
-        # Sunucudaki (Railway vs.) gizli token'ı alıyoruz
-        hf_token = os.environ.get("HF_TOKEN")
-
-        # Token ile bağlanıp, RAM dostu şekilde çekiyoruz
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR, token=hf_token)
-        model = AutoModelForSequenceClassification.from_pretrained(
-            MODEL_DIR,
-            token=hf_token,
-            low_cpu_mem_usage=True  # PyTorch'un RAM'i aniden ikiye katlamasını önler
-        )
-
-        model.eval()
-        device = torch.device("cpu")
-        model.to(device)
-
-        with open("label_encoder.json", "r", encoding="utf-8") as f:
-            le_data = json.load(f)
-        le = LSTM_LabelEncoder()
-        le.classes_ = np.array(le_data["classes"])
-
-        return model, tokenizer, le, device
-    except Exception as e:
-        print(f"❌ BERT yükleme hatası: {e}")
-        return None, None, None, None
-
-
 def load_svc_model():
     try:
         model = joblib.load("linear_svc_model.pkl")
@@ -81,7 +49,7 @@ def load_svc_model():
 
 
 # ===================================================
-# 🔹 ALTYAZI ÇEKME (PLAN B: YT-DLP ANDROID TAKLİDİ)
+# 🔹 ALTYAZI ÇEKME (PLAN B: YT-DLP)
 # ===================================================
 def get_ytdlp_captions(video_id):
     url = f"https://www.youtube.com/watch?v={video_id}"
@@ -113,7 +81,7 @@ def get_ytdlp_captions(video_id):
                 if 'segs' in event:
                     text = "".join([seg.get('utf8', '') for seg in event['segs']]).strip()
                     if not text or re.fullmatch(r"[\[\(].*[\]\)]", text.strip()): continue
-                    text = text.replace("[__]", "siktir").replace("[ __ ]", "amk").replace("[\xa0__\xa0]", "amk")
+                    text = text.replace("[__]", "siktir").replace("[ __ ]", "amk")
                     start = event.get('tStartMs', 0) / 1000.0
                     duration = event.get('dDurationMs', 0) / 1000.0
                     captions.append({"text": text, "start": round(start, 2), "end": round(start + duration, 2)})
@@ -135,16 +103,6 @@ def predict_text_lstm(text, model, tokenizer, le):
     return le.inverse_transform([label_index])[0]
 
 
-def predict_text_bert(text, model, tokenizer, le, device):
-    if model is None: return "MODEL_HATA"
-    inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=128).to(device)
-    with torch.no_grad():
-        outputs = model(**inputs)
-        probs = torch.softmax(outputs.logits, dim=1).cpu().numpy()[0]
-    label_index = np.argmax(probs)
-    return le.inverse_transform([label_index])[0]
-
-
 def predict_text_svc(text, model, vectorizer):
     if model is None: return "MODEL_HATA"
     vec = vectorizer.transform([text])
@@ -163,11 +121,11 @@ def analyze_subtitles(video_id):
         return None
 
     total_lines = len(captions)
-    safe_counts = {"lstm": 0, "bert": 0, "svc": 0}
+    safe_counts = {"lstm": 0, "svc": 0}
 
     print(f"🚀 {total_lines} satır altyazı bulundu. Sıralı analiz başlıyor...")
 
-    print("⏳ 1/3: LSTM Modeli RAM'e yükleniyor...")
+    print("⏳ 1/2: LSTM Modeli RAM'e yükleniyor...")
     lstm_m, lstm_t, lstm_le = load_lstm_model()
     if lstm_m is not None:
         for c in captions:
@@ -176,16 +134,7 @@ def analyze_subtitles(video_id):
     del lstm_m, lstm_t, lstm_le
     gc.collect()
 
-    print("⏳ 2/3: BERT Modeli RAM'e yükleniyor...")
-    bert_m, bert_t, bert_le, bert_d = load_bert_model()
-    if bert_m is not None:
-        for c in captions:
-            if predict_text_bert(c['text'], bert_m, bert_t, bert_le, bert_d) == "OTHER":
-                safe_counts["bert"] += 1
-    del bert_m, bert_t, bert_le, bert_d
-    gc.collect()
-
-    print("⏳ 3/3: Linear SVC Modeli RAM'e yükleniyor...")
+    print("⏳ 2/2: Linear SVC Modeli RAM'e yükleniyor...")
     svc_m, svc_v = load_svc_model()
     if svc_m is not None:
         for c in captions:
@@ -199,8 +148,8 @@ def analyze_subtitles(video_id):
     return {
         "percentages": {
             "lstm": round((safe_counts["lstm"] / total_lines) * 100, 2) if total_lines > 0 else 100.0,
-            "bert": round((safe_counts["bert"] / total_lines) * 100, 2) if total_lines > 0 else 100.0,
             "svc": round((safe_counts["svc"] / total_lines) * 100, 2) if total_lines > 0 else 100.0,
+            "bert": 100.0  # 🎯 DİKKAT: Veritabanı DB schema hatası vermesin diye buraya sahte değer atadık.
         },
         "total_lines": total_lines
     }
