@@ -24,6 +24,10 @@ import torch
 
 tf.config.set_visible_devices([], 'GPU')
 
+# 🚀 İŞTE KÖRLÜĞÜ ÇÖZEN KISIM (DOSYANIN GERÇEK KONUMUNU BULUR)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+COOKIE_PATH = os.path.join(BASE_DIR, 'cookies.txt')
+
 
 # ==============================
 # 🔹 MODEL YÜKLEME FONKSİYONLARI
@@ -75,8 +79,11 @@ def load_svc_model():
 # 🔹 ALTYAZI ÇEKME (PLAN A: YTA API)
 # ===================================================
 def fetch_api(video_id):
-    if os.path.exists('cookies.txt'):
-        return YouTubeTranscriptApi.list_transcripts(video_id, cookies='cookies.txt')
+    if os.path.exists(COOKIE_PATH):
+        print(f"🍪 VIP BİLET BULUNDU! ({COOKIE_PATH}) Sahte kimlikle giriliyor...")
+        return YouTubeTranscriptApi.list_transcripts(video_id, cookies=COOKIE_PATH)
+
+    print("⚠️ DİKKAT: cookies.txt HALA BULUNAMADI! Anonim deneniyor...")
     return YouTubeTranscriptApi.list_transcripts(video_id)
 
 
@@ -133,8 +140,8 @@ def get_ytdlp_captions(video_id):
         'quiet': True, 'no_warnings': True, 'nocheckcertificate': True
     }
 
-    if os.path.exists('cookies.txt'):
-        ydl_opts['cookiefile'] = 'cookies.txt'
+    if os.path.exists(COOKIE_PATH):
+        ydl_opts['cookiefile'] = COOKIE_PATH
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -184,7 +191,7 @@ def get_caption_with_yta(video_id: str):
 
 
 # ===================================================
-# 🔹 TAHMİN FONKSİYONLARI
+# 🔹 TAHMİN FONKSİYONLARI VE ANA ANALİZ
 # ===================================================
 def predict_text_lstm(text, model, tokenizer, le):
     if model is None: return "MODEL_HATA"
@@ -211,9 +218,6 @@ def predict_text_svc(text, model, vectorizer):
     return model.predict(vec)[0]
 
 
-# ===================================================
-# 🔹 ANA ANALİZ FONKSİYONU
-# ===================================================
 def analyze_subtitles(video_id):
     captions = get_caption_with_yta(video_id)
     if not captions:
