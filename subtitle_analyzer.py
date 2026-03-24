@@ -1,13 +1,12 @@
 import re
 import json
 import gc
-import os
 import requests
 import numpy as np
 import joblib
 import concurrent.futures
 
-# ÇİFT MOTORLU SİSTEM
+# ÇİFT MOTORLU + AYNA SUNUCU SİSTEMİ
 from youtube_transcript_api import YouTubeTranscriptApi
 import yt_dlp
 
@@ -23,10 +22,6 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 
 tf.config.set_visible_devices([], 'GPU')
-
-# 🚀 İŞTE KÖRLÜĞÜ ÇÖZEN KISIM (DOSYANIN GERÇEK KONUMUNU BULUR)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-COOKIE_PATH = os.path.join(BASE_DIR, 'cookies.txt')
 
 
 # ==============================
@@ -76,14 +71,9 @@ def load_svc_model():
 
 
 # ===================================================
-# 🔹 ALTYAZI ÇEKME (PLAN A: YTA API)
+# 🔹 ALTYAZI ÇEKME (PLAN A: YTA API - ÇEREZSİZ)
 # ===================================================
 def fetch_api(video_id):
-    if os.path.exists(COOKIE_PATH):
-        print(f"🍪 VIP BİLET BULUNDU! ({COOKIE_PATH}) Sahte kimlikle giriliyor...")
-        return YouTubeTranscriptApi.list_transcripts(video_id, cookies=COOKIE_PATH)
-
-    print("⚠️ DİKKAT: cookies.txt HALA BULUNAMADI! Anonim deneniyor...")
     return YouTubeTranscriptApi.list_transcripts(video_id)
 
 
@@ -140,9 +130,6 @@ def get_ytdlp_captions(video_id):
         'quiet': True, 'no_warnings': True, 'nocheckcertificate': True
     }
 
-    if os.path.exists(COOKIE_PATH):
-        ydl_opts['cookiefile'] = COOKIE_PATH
-
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -169,24 +156,92 @@ def get_ytdlp_captions(video_id):
 
 
 # ===================================================
-# 🔹 ANA ÇEKİCİ (İKİ MOTORU DA DENER)
+# 🔹 ALTYAZI ÇEKME (PLAN C: FARKLI SUNUCULAR - PIPED API)
+# ===================================================
+def get_plan_c_captions(video_id):
+    print(f"🌍 [PLAN C] Alternatif Ayna Sunucular (Piped API) deneniyor... ({video_id})")
+
+    instances = [
+        "https://pipedapi.kavin.rocks",
+        "https://pipedapi.tokhmi.xyz",
+        "https://pipedapi.smnz.de"
+    ]
+
+    for base_url in instances:
+        try:
+            print(f"🔄 İstek atılıyor: {base_url} ...")
+            api_url = f"{base_url}/streams/{video_id}"
+            resp = requests.get(api_url, timeout=10)
+            if resp.status_code != 200:
+                continue
+
+            data = resp.json()
+            subtitles = data.get('subtitles', [])
+
+            tr_url = None
+            for sub in subtitles:
+                if sub.get('code') == 'tr' or 'Turkish' in sub.get('name', ''):
+                    tr_url = sub.get('url')
+                    break
+
+            if not tr_url:
+                continue
+
+            sub_resp = requests.get(tr_url, timeout=10)
+            vtt_text = sub_resp.text
+
+            captions = []
+            blocks = re.split(r'\n\n+', vtt_text)
+
+            for block in blocks:
+                lines = block.strip().split('\n')
+                time_line = ""
+                text_lines = []
+                for line in lines:
+                    if '-->' in line:
+                        time_line = line
+                    elif time_line and line.strip() and not line.startswith('WEBVTT'):
+                        text_lines.append(line.strip())
+
+                if time_line and text_lines:
+                    text = " ".join(text_lines)
+                    text = re.sub(r'<[^>]+>', '', text)
+                    text = text.replace("[__]", "siktir").replace("[ __ ]", "amk")
+                    captions.append({"text": text, "start": 0.0, "end": 0.0})
+
+            if captions:
+                return captions
+        except Exception as e:
+            print(f"⚠️ Sunucu ({base_url}) hata verdi: {e}. Diğerine geçiliyor...")
+            continue
+
+    print("🛑 PLAN C (Tüm Ayna Sunucular) başarısız oldu.")
+    return []
+
+
+# ===================================================
+# 🔹 ANA ÇEKİCİ (3 MOTORU DA SIRAYLA DENER)
 # ===================================================
 def get_caption_with_yta(video_id: str):
     print(f"🔍 [PLAN A] youtube-transcript-api deneniyor... ({video_id})")
     captions = get_yta_captions(video_id)
-
     if captions:
         print(f"✅ PLAN A Başarılı: {len(captions)} satır çekildi.")
         return captions
 
     print(f"⚠️ PLAN A İşe Yaramadı. 🔍 [PLAN B] yt-dlp Android/iOS taklidi ateşleniyor... ({video_id})")
     captions = get_ytdlp_captions(video_id)
-
     if captions:
         print(f"✅ PLAN B Başarılı: {len(captions)} satır çekildi.")
         return captions
 
-    print("🛑 İki motor da YouTube engeline takıldı. (IP Ban)")
+    print(f"⚠️ PLAN B İşe Yaramadı. 🌍 [PLAN C] Harici Sunucu Proxy'leri ateşleniyor... ({video_id})")
+    captions = get_plan_c_captions(video_id)
+    if captions:
+        print(f"✅ PLAN C Başarılı: {len(captions)} satır ayna sunucudan çekildi.")
+        return captions
+
+    print("🛑 Bütün motorlar YouTube engeline takıldı.")
     return []
 
 
