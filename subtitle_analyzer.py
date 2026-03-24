@@ -2,12 +2,14 @@ import re
 import json
 import gc
 import os
+import requests
 import numpy as np
 import joblib
-import concurrent.futures  # YENİ: Gölge ban koruması ve zaman aşımı için
+import concurrent.futures
 
-# YENİ SİLAHIMIZ
+# ÇİFT MOTORLU SİSTEM
 from youtube_transcript_api import YouTubeTranscriptApi
+import yt_dlp
 
 # Model 1: LSTM
 import tensorflow as tf
@@ -20,7 +22,6 @@ from sklearn.preprocessing import LabelEncoder as LSTM_LabelEncoder
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 
-# GPU aramasın, direkt CPU kullansın
 tf.config.set_visible_devices([], 'GPU')
 
 
@@ -71,41 +72,21 @@ def load_svc_model():
 
 
 # ===================================================
-# 🔹 ALTYAZI ÇEKME (ZIRHLI & ÇEREZSİZ VERSİYON)
+# 🔹 ALTYAZI ÇEKME (PLAN A: YTA API)
 # ===================================================
 def fetch_api(video_id):
-    """Sadece API'ye istek atan saf fonksiyon (Thread içinde çalışacak)"""
     if os.path.exists('cookies.txt'):
         return YouTubeTranscriptApi.list_transcripts(video_id, cookies='cookies.txt')
-    else:
-        return YouTubeTranscriptApi.list_transcripts(video_id)
+    return YouTubeTranscriptApi.list_transcripts(video_id)
 
 
-def get_caption_with_yta(video_id: str):
-    print(f"🔍 youtube-transcript-api ile altyazı aranıyor... Video ID: {video_id}")
-
-    transcript_list = None
-
-    # 🛡️ GÖLGE BAN (SHADOWBAN) KORUMASI: 10 Saniye Şalteri
+def get_yta_captions(video_id):
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(fetch_api, video_id)
-            # 10 saniye bekle, YouTube cevap vermezse işlemi öldür!
             transcript_list = future.result(timeout=10)
 
-    except concurrent.futures.TimeoutError:
-        print("🛑 KORUMA DEVREDE: YouTube gölge ban uyguluyor (asılı kalma). Sunucu kilitlenmesi başarıyla önlendi!")
-        return []
-    except Exception as e:
-        print(f"⚠️ Altyazı listesi çekilemedi. Hata: {e}")
-        return []
-
-    if not transcript_list:
-        return []
-
-    try:
         transcript = None
-        # Önce Türkçe ara, yoksa otomatik oluşturulan Türkçe, o da yoksa İngilizceyi çevir
         try:
             transcript = transcript_list.find_transcript(['tr'])
         except:
@@ -116,39 +97,90 @@ def get_caption_with_yta(video_id: str):
                     if t.is_translatable:
                         transcript = t.translate('tr')
                         break
-
-        if not transcript:
-            print("⚠️ DİKKAT: Türkçe altyazı bulunamadı!")
-            return []
+        if not transcript: return []
 
         data = transcript.fetch()
         captions = []
-
         for item in data:
             text = item.get('text', '').strip()
-
-            if not text or re.fullmatch(r"[\[\(].*[\]\)]", text):
-                continue
-
-            # Küfür düzeltmeleri
-            text = text.replace("[__]", "siktir").replace("[ __ ]", "amk").replace("[\xa0__\xa0]", "amk")
-            text = text.replace("\n", " ")
-
+            if not text or re.fullmatch(r"[\[\(].*[\]\)]", text): continue
+            text = text.replace("[__]", "siktir").replace("[ __ ]", "amk").replace("[\xa0__\xa0]", "amk").replace("\n",
+                                                                                                                  " ")
             start = float(item.get('start', 0))
             duration = float(item.get('duration', 0))
+            captions.append({"text": text, "start": round(start, 2), "end": round(start + duration, 2)})
+        return captions
+    except Exception as e:
+        print(f"⚠️ YTA API başarısız oldu: {e}")
+        return []
 
-            captions.append({
-                "text": text,
-                "start": round(start, 2),
-                "end": round(start + duration, 2)
-            })
 
-        print(f"✅ Başarıyla çekildi: {len(captions)} satır.")
+# ===================================================
+# 🔹 ALTYAZI ÇEKME (PLAN B: YT-DLP ANDROID TAKLİDİ)
+# ===================================================
+def get_ytdlp_captions(video_id):
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    ydl_opts = {
+        'skip_download': True, 'writesubtitles': True, 'writeautomaticsub': True,
+        'subtitleslangs': ['tr'], 'subtitlesformat': 'json3',
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios', 'mweb'],
+                'player_skip': ['webpage', 'configs']
+            }
+        },
+        'user_agent': 'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36',
+        'quiet': True, 'no_warnings': True, 'nocheckcertificate': True
+    }
+
+    if os.path.exists('cookies.txt'):
+        ydl_opts['cookiefile'] = 'cookies.txt'
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            subs = info.get('requested_subtitles', {})
+            if not subs or 'tr' not in subs: return []
+            sub_url = subs['tr'].get('url')
+            if not sub_url: return []
+
+            resp = requests.get(sub_url, timeout=10)
+            data = resp.json()
+            captions = []
+            for event in data.get('events', []):
+                if 'segs' in event:
+                    text = "".join([seg.get('utf8', '') for seg in event['segs']]).strip()
+                    if not text or re.fullmatch(r"[\[\(].*[\]\)]", text.strip()): continue
+                    text = text.replace("[__]", "siktir").replace("[ __ ]", "amk").replace("[\xa0__\xa0]", "amk")
+                    start = event.get('tStartMs', 0) / 1000.0
+                    duration = event.get('dDurationMs', 0) / 1000.0
+                    captions.append({"text": text, "start": round(start, 2), "end": round(start + duration, 2)})
+            return captions
+    except Exception as e:
+        print(f"⚠️ YT-DLP Android taklidi de başarısız oldu: {e}")
+        return []
+
+
+# ===================================================
+# 🔹 ANA ÇEKİCİ (İKİ MOTORU DA DENER)
+# ===================================================
+def get_caption_with_yta(video_id: str):
+    print(f"🔍 [PLAN A] youtube-transcript-api deneniyor... ({video_id})")
+    captions = get_yta_captions(video_id)
+
+    if captions:
+        print(f"✅ PLAN A Başarılı: {len(captions)} satır çekildi.")
         return captions
 
-    except Exception as e:
-        print(f"⚠️ Altyazı verisi okunurken hata: {e}")
-        return []
+    print(f"⚠️ PLAN A İşe Yaramadı. 🔍 [PLAN B] yt-dlp Android/iOS taklidi ateşleniyor... ({video_id})")
+    captions = get_ytdlp_captions(video_id)
+
+    if captions:
+        print(f"✅ PLAN B Başarılı: {len(captions)} satır çekildi.")
+        return captions
+
+    print("🛑 İki motor da YouTube engeline takıldı. (IP Ban)")
+    return []
 
 
 # ===================================================
