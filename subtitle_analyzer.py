@@ -3,8 +3,10 @@ import json
 import gc  # RAM temizliği için
 import numpy as np
 import joblib
-import requests  # YENİ
-import yt_dlp    # YENİ (Sorunsuz altyazı çekici)
+
+# YENİ HAYALET SİLAHIMIZ (yt-dlp ve requests sildik)
+from youtube_transcript_api import YouTubeTranscriptApi
+
 # Model 1: LSTM (TensorFlow/Keras)
 import tensorflow as tf
 from tensorflow.keras.models import load_model
@@ -67,83 +69,68 @@ def load_svc_model():
 
 
 # ===================================================
-# 🔹 ALTYAZI ÇEKME (YT-DLP İLE YENİLENDİ!)
-# ===================================================
-# ===================================================
-# 🔹 ALTYAZI ÇEKME (YT-DLP + ANDROID TAKLİDİ!)
-# ===================================================
-# ===================================================
-# 🔹 ALTYAZI ÇEKME (YT-DLP + ANDROID & IOS & WEB TAKLİDİ!)
+# 🔹 ALTYAZI ÇEKME (YOUTUBE-TRANSCRIPT-API İLE ÇEREZSİZ!)
 # ===================================================
 def get_caption_with_yta(video_id: str):
-    print(f"🔍 yt-dlp ile Gelişmiş Atlatma Yöntemi deneniyor... Video ID: {video_id}")
-    url = f"https://www.youtube.com/watch?v={video_id}"
-
-    ydl_opts = {
-        'skip_download': True,
-        'writesubtitles': True,
-        'writeautomaticsub': True,
-        'subtitleslangs': ['tr'],
-        'subtitlesformat': 'json3',
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['ios', 'android', 'mweb'],
-                # PO Token hatasını aşmak için eklenen kısım:
-                'po_token': ['web+1'],
-                'player_skip': ['webpage', 'configs']
-            }
-        },
-        # User agent'ı en güncel Chrome yapalım
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'nocheckcertificate': True,
-    }
+    print(f"🔍 youtube-transcript-api ile altyazı aranıyor... Video ID: {video_id}")
+    
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # YouTube bazen IP'yi mimlediği için extract_info'yu dikkatli çağırıyoruz
-            info = ydl.extract_info(url, download=False)
+        # Tüm altyazı listesini al
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript = None
 
-            subs = info.get('requested_subtitles', {})
-            if not subs or 'tr' not in subs:
-                print("⚠️ DİKKAT: Türkçe altyazı bulunamadı!")
-                return []
+        try:
+            # 1. Önce videoya orijinal olarak eklenmiş Türkçe (tr) altyazı var mı diye bak
+            transcript = transcript_list.find_transcript(['tr'])
+        except:
+            try:
+                # 2. Yoksa, YouTube'un otomatik oluşturduğu Türkçe altyazıyı al
+                transcript = transcript_list.find_generated_transcript(['tr'])
+            except:
+                # 3. TR hiç yoksa, herhangi bir dildekini bul ve anında Türkçeye çevir!
+                for t in transcript_list:
+                    if t.is_translatable:
+                        transcript = t.translate('tr')
+                        break
+        
+        if not transcript:
+            print("⚠️ DİKKAT: Türkçe altyazı veya çevrilebilir bir altyazı bulunamadı!")
+            return []
 
-            sub_url = subs['tr'].get('url')
-            if not sub_url:
-                return []
+        # Altyazı verilerini çek
+        data = transcript.fetch()
+        captions = []
 
-            # Zaman aşımı ekleyerek (timeout) daha güvenli istek atalım
-            resp = requests.get(sub_url, timeout=15)
-            data = resp.json()
+        for item in data:
+            text = item.get('text', '').strip()
+            
+            # Boş veya [Müzik] gibi sahneleri atla
+            if not text or re.fullmatch(r"[\[\(].*[\]\)]", text):
+                continue
 
-            captions = []
-            for event in data.get('events', []):
-                if 'segs' in event:
-                    text = "".join([seg.get('utf8', '') for seg in event['segs']]).strip()
+            # Küfür düzeltmeleri
+            text = text.replace("[__]", "siktir").replace("[ __ ]", "amk").replace("[\xa0__\xa0]", "amk")
+            text = text.replace("\n", " ") # Satır atlamalarını temizle
 
-                    if not text or re.fullmatch(r"[\[\(].*[\]\)]", text.strip()):
-                        continue
+            start = float(item.get('start', 0))
+            duration = float(item.get('duration', 0))
 
-                    # Küfür düzeltmeleri (Senin kodundaki mantık)
-                    text = text.replace("[__]", "siktir").replace("[ __ ]", "amk").replace("[\xa0__\xa0]", "amk")
+            captions.append({
+                "text": text,
+                "start": round(start, 2),
+                "end": round(start + duration, 2)
+            })
 
-                    start = event.get('tStartMs', 0) / 1000.0
-                    duration = event.get('dDurationMs', 0) / 1000.0
-
-                    captions.append({
-                        "text": text,
-                        "start": round(start, 2),
-                        "end": round(start + duration, 2)
-                    })
-
-            print(f"✅ Başarıyla çekildi: {len(captions)} satır.")
-            return captions
+        print(f"✅ Başarıyla çekildi: {len(captions)} satır (Çerezsiz Yöntem).")
+        return captions
 
     except Exception as e:
-        print(f"⚠️ DİKKAT: yt-dlp hala 'Sign in' diyorsa YouTube IP'yi bloklamış olabilir: {e}")
+        print(f"⚠️ Altyazı çekilemedi. Hata: {e}")
         return []
 
+
 # ===================================================
-# 🔹 TAHMİN FONKSİYONLARI (Artık modelleri parametre olarak alıyor)
+# 🔹 TAHMİN FONKSİYONLARI 
 # ===================================================
 def predict_text_lstm(text, model, tokenizer, le):
     if model is None: return "MODEL_HATA"
@@ -170,9 +157,6 @@ def predict_text_svc(text, model, vectorizer):
     return model.predict(vec)[0]
 
 
-# ===================================================
-# 🔹 ANA ANALİZ FONKSİYONU (SİHİR BURADA GERÇEKLEŞİYOR)
-# ===================================================
 # ===================================================
 # 🔹 ANA ANALİZ FONKSİYONU (SIRALI YÜKLEME VE SİLME)
 # ===================================================
