@@ -4,7 +4,7 @@ import gc
 import requests
 import numpy as np
 import joblib
-
+import os # Bunu en üste eklemeyi unutma
 # SADECE PLAN B: YT-DLP
 import yt_dlp
 
@@ -43,15 +43,27 @@ def load_lstm_model():
 def load_bert_model():
     try:
         MODEL_DIR = "armud/emir-toxic-bert"
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
-        model = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR)
+
+        # Sunucudaki (Railway vs.) gizli token'ı alıyoruz
+        hf_token = os.environ.get("HF_TOKEN")
+
+        # Token ile bağlanıp, RAM dostu şekilde çekiyoruz
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR, token=hf_token)
+        model = AutoModelForSequenceClassification.from_pretrained(
+            MODEL_DIR,
+            token=hf_token,
+            low_cpu_mem_usage=True  # PyTorch'un RAM'i aniden ikiye katlamasını önler
+        )
+
         model.eval()
         device = torch.device("cpu")
         model.to(device)
+
         with open("label_encoder.json", "r", encoding="utf-8") as f:
             le_data = json.load(f)
         le = LSTM_LabelEncoder()
         le.classes_ = np.array(le_data["classes"])
+
         return model, tokenizer, le, device
     except Exception as e:
         print(f"❌ BERT yükleme hatası: {e}")

@@ -1,13 +1,21 @@
+# --- Web ve Sunucu ---
 flask
 flask-cors
+gunicorn
+
+# --- Veri Çekme ---
 youtube-transcript-api==0.6.2
 yt-dlp
+requests
+
+# --- Veritabanı ---
+pg8000
+
+# --- Makine Öğrenmesi (Sadece CPU - Hafif Versiyonlar) ---
 tensorflow-cpu
+--extra-index-url https://download.pytorch.org/whl/cpu
 torch
 transformers
 scikit-learn
 joblib
 numpy
-pg8000
-gunicorn
-requests
