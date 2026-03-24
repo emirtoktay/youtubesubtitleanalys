@@ -10,3 +10,4 @@ joblib
 numpy
 pg8000
 gunicorn
+youtube-transcript-api
