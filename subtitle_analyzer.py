@@ -1,18 +1,21 @@
 import re
 import json
-import gc  # RAM temizliği için
+import gc
+import os
 import numpy as np
 import joblib
-import requests  # YENİ
-import yt_dlp    # YENİ (Sorunsuz altyazı çekici)
-# Model 1: LSTM (TensorFlow/Keras)
+
+# YENİ SİLAHIMIZ
+from youtube_transcript_api import YouTubeTranscriptApi
+
+# Model 1: LSTM
 import tensorflow as tf
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.text import tokenizer_from_json
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from sklearn.preprocessing import LabelEncoder as LSTM_LabelEncoder
 
-# Model 2: BERT (Hugging Face Transformers/PyTorch)
+# Model 2: BERT
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 
@@ -67,83 +70,69 @@ def load_svc_model():
 
 
 # ===================================================
-# 🔹 ALTYAZI ÇEKME (YT-DLP İLE YENİLENDİ!)
-# ===================================================
-# ===================================================
-# 🔹 ALTYAZI ÇEKME (YT-DLP + ANDROID TAKLİDİ!)
-# ===================================================
-# ===================================================
-# 🔹 ALTYAZI ÇEKME (YT-DLP + ANDROID & IOS & WEB TAKLİDİ!)
+# 🔹 ALTYAZI ÇEKME (API + AKILLI COOKIE KONTROLÜ)
 # ===================================================
 def get_caption_with_yta(video_id: str):
-    print(f"🔍 yt-dlp ile Gelişmiş Atlatma Yöntemi deneniyor... Video ID: {video_id}")
-    url = f"https://www.youtube.com/watch?v={video_id}"
+    print(f"🔍 youtube-transcript-api ile altyazı aranıyor... Video ID: {video_id}")
 
-    ydl_opts = {
-        'skip_download': True,
-        'writesubtitles': True,
-        'writeautomaticsub': True,
-        'subtitleslangs': ['tr'],
-        'subtitlesformat': 'json3',
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['ios', 'android', 'mweb'],
-                # PO Token hatasını aşmak için eklenen kısım:
-                'po_token': ['web+1'],
-                'player_skip': ['webpage', 'configs']
-            }
-        },
-        # User agent'ı en güncel Chrome yapalım
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'nocheckcertificate': True,
-    }
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # YouTube bazen IP'yi mimlediği için extract_info'yu dikkatli çağırıyoruz
-            info = ydl.extract_info(url, download=False)
+        # Klasörde sahte hesap çerezi (cookies.txt) var mı kontrol et
+        if os.path.exists('cookies.txt'):
+            print("🍪 cookies.txt bulundu, sahte kimlikle bağlanılıyor...")
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id, cookies='cookies.txt')
+        else:
+            print("🌐 Çerez yok, anonim bağlanılıyor...")
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
 
-            subs = info.get('requested_subtitles', {})
-            if not subs or 'tr' not in subs:
-                print("⚠️ DİKKAT: Türkçe altyazı bulunamadı!")
-                return []
+        transcript = None
 
-            sub_url = subs['tr'].get('url')
-            if not sub_url:
-                return []
+        try:
+            transcript = transcript_list.find_transcript(['tr'])
+        except:
+            try:
+                transcript = transcript_list.find_generated_transcript(['tr'])
+            except:
+                for t in transcript_list:
+                    if t.is_translatable:
+                        transcript = t.translate('tr')
+                        break
 
-            # Zaman aşımı ekleyerek (timeout) daha güvenli istek atalım
-            resp = requests.get(sub_url, timeout=15)
-            data = resp.json()
+        if not transcript:
+            print("⚠️ DİKKAT: Türkçe altyazı bulunamadı!")
+            return []
 
-            captions = []
-            for event in data.get('events', []):
-                if 'segs' in event:
-                    text = "".join([seg.get('utf8', '') for seg in event['segs']]).strip()
+        data = transcript.fetch()
+        captions = []
 
-                    if not text or re.fullmatch(r"[\[\(].*[\]\)]", text.strip()):
-                        continue
+        for item in data:
+            text = item.get('text', '').strip()
 
-                    # Küfür düzeltmeleri (Senin kodundaki mantık)
-                    text = text.replace("[__]", "siktir").replace("[ __ ]", "amk").replace("[\xa0__\xa0]", "amk")
+            if not text or re.fullmatch(r"[\[\(].*[\]\)]", text):
+                continue
 
-                    start = event.get('tStartMs', 0) / 1000.0
-                    duration = event.get('dDurationMs', 0) / 1000.0
+            # Küfür düzeltmeleri
+            text = text.replace("[__]", "siktir").replace("[ __ ]", "amk").replace("[\xa0__\xa0]", "amk")
+            text = text.replace("\n", " ")
 
-                    captions.append({
-                        "text": text,
-                        "start": round(start, 2),
-                        "end": round(start + duration, 2)
-                    })
+            start = float(item.get('start', 0))
+            duration = float(item.get('duration', 0))
 
-            print(f"✅ Başarıyla çekildi: {len(captions)} satır.")
-            return captions
+            captions.append({
+                "text": text,
+                "start": round(start, 2),
+                "end": round(start + duration, 2)
+            })
+
+        print(f"✅ Başarıyla çekildi: {len(captions)} satır.")
+        return captions
 
     except Exception as e:
-        print(f"⚠️ DİKKAT: yt-dlp hala 'Sign in' diyorsa YouTube IP'yi bloklamış olabilir: {e}")
+        print(f"⚠️ Altyazı çekilemedi. Hata: {e}")
         return []
 
+
 # ===================================================
-# 🔹 TAHMİN FONKSİYONLARI (Artık modelleri parametre olarak alıyor)
+# 🔹 TAHMİN FONKSİYONLARI
 # ===================================================
 def predict_text_lstm(text, model, tokenizer, le):
     if model is None: return "MODEL_HATA"
@@ -171,10 +160,7 @@ def predict_text_svc(text, model, vectorizer):
 
 
 # ===================================================
-# 🔹 ANA ANALİZ FONKSİYONU (SİHİR BURADA GERÇEKLEŞİYOR)
-# ===================================================
-# ===================================================
-# 🔹 ANA ANALİZ FONKSİYONU (SIRALI YÜKLEME VE SİLME)
+# 🔹 ANA ANALİZ FONKSİYONU
 # ===================================================
 def analyze_subtitles(video_id):
     captions = get_caption_with_yta(video_id)
@@ -186,45 +172,30 @@ def analyze_subtitles(video_id):
 
     print(f"🚀 {total_lines} satır altyazı bulundu. Sıralı analiz başlıyor...")
 
-    # ---------------------------------------------------
-    # 1. AŞAMA: SADECE LSTM
-    # ---------------------------------------------------
     print("⏳ 1/3: LSTM Modeli RAM'e yükleniyor...")
     lstm_m, lstm_t, lstm_le = load_lstm_model()
     if lstm_m is not None:
         for c in captions:
-            l_label = predict_text_lstm(c['text'], lstm_m, lstm_t, lstm_le)
-            if l_label == "OTHER":
+            if predict_text_lstm(c['text'], lstm_m, lstm_t, lstm_le) == "OTHER":
                 safe_counts["lstm"] += 1
-    print("🧹 LSTM işi bitti, RAM'den siliniyor...")
     del lstm_m, lstm_t, lstm_le
     gc.collect()
 
-    # ---------------------------------------------------
-    # 2. AŞAMA: SADECE BERT (En Ağırı)
-    # ---------------------------------------------------
     print("⏳ 2/3: BERT Modeli RAM'e yükleniyor...")
     bert_m, bert_t, bert_le, bert_d = load_bert_model()
     if bert_m is not None:
         for c in captions:
-            b_label = predict_text_bert(c['text'], bert_m, bert_t, bert_le, bert_d)
-            if b_label == "OTHER":
+            if predict_text_bert(c['text'], bert_m, bert_t, bert_le, bert_d) == "OTHER":
                 safe_counts["bert"] += 1
-    print("🧹 BERT işi bitti, RAM'den siliniyor...")
     del bert_m, bert_t, bert_le, bert_d
     gc.collect()
 
-    # ---------------------------------------------------
-    # 3. AŞAMA: SADECE SVC
-    # ---------------------------------------------------
     print("⏳ 3/3: Linear SVC Modeli RAM'e yükleniyor...")
     svc_m, svc_v = load_svc_model()
     if svc_m is not None:
         for c in captions:
-            s_label = predict_text_svc(c['text'], svc_m, svc_v)
-            if s_label == "OTHER":
+            if predict_text_svc(c['text'], svc_m, svc_v) == "OTHER":
                 safe_counts["svc"] += 1
-    print("🧹 SVC işi bitti, RAM'den siliniyor...")
     del svc_m, svc_v
     gc.collect()
 
