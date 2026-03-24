@@ -1,6 +1,5 @@
 flask
 flask-cors
-yt-dlp
 requests
 tensorflow-cpu
 torch
@@ -10,4 +9,4 @@ joblib
 numpy
 pg8000
 gunicorn
-youtube-transcript-api
+youtube-transcript-api==0.6.2
